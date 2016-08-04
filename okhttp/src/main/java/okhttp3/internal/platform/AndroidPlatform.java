@@ -25,6 +25,7 @@ import java.net.Socket;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.SSLPeerUnverifiedException;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
@@ -44,6 +45,8 @@ class AndroidPlatform extends Platform {
   // Non-null on Android 5.0+.
   private final OptionalMethod<Socket> getAlpnSelectedProtocol;
   private final OptionalMethod<Socket> setAlpnProtocols;
+
+  private final AtomicBoolean missingCloseGuard = new AtomicBoolean();
 
   public AndroidPlatform(Class<?> sslParametersClass, OptionalMethod<Socket> setUseSessionTickets,
       OptionalMethod<Socket> setHostname, OptionalMethod<Socket> getAlpnSelectedProtocol,
@@ -130,6 +133,34 @@ class AndroidPlatform extends Platform {
         i = end;
       } while (i < newline);
     }
+  }
+
+  @Override public Object captureAllocationSite() {
+    if (missingCloseGuard.get()) return null;
+
+    try {
+      Class<?> closeGuardClass = Class.forName("dalvik.system.CloseGuard");
+      Method getMethod = closeGuardClass.getMethod("get");
+      Object instance = getMethod.invoke(null);
+      Method openMethod = closeGuardClass.getMethod("open", String.class);
+      openMethod.invoke(instance, "response.body().close()");
+      return instance;
+    } catch (Exception ignored) {
+      // Never fail on this, and don't make users pay for further reflection calls that fail.
+      missingCloseGuard.set(true);
+    }
+    return null;
+  }
+
+  @Override public void reportLeakedAllocation(String message, Object allocationSite) {
+    try {
+      Class<?> closeGuardClass = Class.forName("dalvik.system.CloseGuard");
+      Method warnIfOpenMethod = closeGuardClass.getMethod("warnIfOpen");
+      warnIfOpenMethod.invoke(allocationSite);
+      return;
+    } catch (Exception ignored) {
+    }
+    log(WARN, message, null);
   }
 
   @Override public boolean isCleartextTrafficPermitted(String hostname) {

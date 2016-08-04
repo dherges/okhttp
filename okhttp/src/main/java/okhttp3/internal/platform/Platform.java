@@ -133,6 +133,20 @@ public class Platform {
     return true;
   }
 
+  public Object captureAllocationSite() {
+    if (!logger.isLoggable(Level.FINE)) return null;
+    return new Throwable("response.body().close()");
+  }
+
+  public void reportLeakedAllocation(String message, Object allocationSite) {
+    Throwable throwable = (Throwable) allocationSite;
+    if (allocationSite == null) {
+      message += " To see the where this connection was allocated, set the okhttp3.OkHttpClient "
+          + "level to Level.FINE.";
+    }
+    log(WARN, message, throwable);
+  }
+
   public static List<String> alpnProtocolNames(List<Protocol> protocols) {
     List<String> names = new ArrayList<>(protocols.size());
     for (int i = 0, size = protocols.size(); i < size; i++) {
